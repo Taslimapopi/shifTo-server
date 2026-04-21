@@ -22,6 +22,22 @@ const client = new MongoClient(uri, {
   }
 });
 
+// generate traciking id function from AI
+
+const crypto = require("crypto");
+const { Transform } = require('stream');
+const { runInNewContext } = require('vm');
+
+function generateTrackingId() {
+  // Generate a random string using crypto
+  const randomPart = crypto.randomBytes(4).toString("hex").toUpperCase(); // 8 characters
+  // Get the current timestamp
+  const timestampPart = Date.now().toString(36).toUpperCase(); // Base36 timestamp
+  // Combine parts to form the tracking ID
+  const trackingId = `TRK-${timestampPart}-${randomPart}`;
+  return trackingId;
+}
+
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
@@ -29,6 +45,7 @@ async function run() {
 
     const db = client.db('shifTo_db');
     const parcelsCollection = db.collection('parcels')
+    const paymentsCollection = db.collection('payments')
 
     // all parcels api
 
@@ -80,7 +97,7 @@ app.post('/create-checkout-session', async (req, res) => {
                         currency: 'usd',           // Change to 'bdt' if you want Taka
                         unit_amount: amount * 100, // Convert to cents/paisa
                         product_data: {
-                            name: parcelName || "Parcel Delivery",
+                            name: `Please pay for: ${parcelName}`,
                         },
                     },
                     quantity: 1,
@@ -89,6 +106,7 @@ app.post('/create-checkout-session', async (req, res) => {
             customer_email: senderEmail,
             metadata: {
                 parcelId: parcelId,
+                parcelName: parcelName,
             },
             mode: 'payment',
             success_url: `${process.env.YOUR_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -102,6 +120,48 @@ app.post('/create-checkout-session', async (req, res) => {
         res.status(500).send({ error: error.message });
     }
 });
+
+app.patch('/payment-success', async(req, res)=>{
+    const sessionId = req.query.session_id
+    const session = await stripe.checkout.sessions.retrieve(sessionId)
+    if(session.payment_status=== 'paid'){
+        const id = session.metadata.parcelId
+        const query = {_id: new ObjectId(id)}
+        const transactionId = session.payment_intent
+        const trackingId = generateTrackingId()
+        const update = {
+            $set: {
+                paymentStatus : 'paid',
+                transactionId : transactionId,
+                trackingId: trackingId,
+            }
+        }
+        const result = await parcelsCollection.updateOne(query,update)
+        
+        const payment = {
+        parcelName: session.metadata.parcelName,
+        parcelId: session.metadata.parcelId,
+        senderEmail: session.customer_email,
+        transactionId: transactionId,
+        trackingId: trackingId,
+        paymentStatus: session.payment_status,
+        cost: session.amount_total/100,
+        paidAt: new Date()
+    }
+
+    const resultPayment = await paymentsCollection.insertOne(payment)
+
+    res.send({result, transactionId: transactionId,
+        trackingId:trackingId,
+        
+        paymentInfo:resultPayment})
+
+    }
+
+    
+    res.send({ success: false })
+    console.log(session)
+})
     
 
 
