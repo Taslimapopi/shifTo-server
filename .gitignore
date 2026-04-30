@@ -1,3 +1,5 @@
 node_modules
 
 .env
+
+shifto-firebase-adminsdk.json

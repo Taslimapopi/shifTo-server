@@ -5,14 +5,48 @@ require("dotenv").config();
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const port = process.env.PORT || 3000;
 
+
+
 const stripe = require("stripe")(process.env.STRIPE_PAY);
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.rgrxfrw.mongodb.net/?appName=Cluster0`;
+
+let admin = require("firebase-admin");
+
+let serviceAccount = require("./shifto-firebase-adminsdk.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 // middleware
 
 app.use(express.json());
 app.use(cors());
+
+const verifyFbToken =async (req, res, next) =>{
+  
+  const token = req.headers.authorization
+  
+  if(!token) {
+    return res.status(401).send({message: 'unauthorize access'})
+  }
+  try{
+    const idToken = token.split(' ')[1]
+    const decoded = await admin.auth().verifyIdToken(idToken)
+    req.decoded_email = decoded.email
+    console.log(decoded)
+    next()
+  }
+  catch(err){
+    return res.status(401).send({message: 'unauthorize access'})
+  }
+
+
+
+  
+}
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -157,6 +191,7 @@ async function run() {
           trackingId: trackingId,
           paymentStatus: session.payment_status,
           cost: session.amount_total / 100,
+          currency: session.currency,
           paidAt: new Date(),
         };
 
@@ -174,6 +209,20 @@ async function run() {
       res.send({ success: false });
       console.log(session);
     });
+
+    app.get('/payments',verifyFbToken, async(req,res)=>{
+      const email = req.query.email
+      const query = {}
+     
+      if(email) {
+        query.senderEmail = email
+        if(email !== req.decoded_email){
+          return res.status(403).send({message: 'forbidden access'})
+        }
+      }
+      const result = await paymentsCollection.find(query).toArray()
+      res.send(result)
+    })
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
