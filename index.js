@@ -61,6 +61,7 @@ const client = new MongoClient(uri, {
 const crypto = require("crypto");
 const { Transform } = require("stream");
 const { runInNewContext } = require("vm");
+const { networkInterfaces } = require("os");
 
 function generateTrackingId() {
   // Generate a random string using crypto
@@ -80,6 +81,80 @@ async function run() {
     const db = client.db("shifTo_db");
     const parcelsCollection = db.collection("parcels");
     const paymentsCollection = db.collection("payments");
+    const usersCollection = db.collection("users")
+    const ridersCollection = db.collection("riders")
+
+    // all users api
+
+    app.post('/users',async(req,res)=>{
+      const user = req.body
+      const email = user.email
+      const userExist = await usersCollection.findOne({email})
+      if(userExist) {
+        return res.result({message: 'user already existed'})
+      }
+      user.role = 'user'
+      user.createdAt = new Date().toISOString()
+      const result = await usersCollection.insertOne(user)
+      res.send(result)
+    })
+
+    // rider api
+
+      // riders related apis
+        app.get('/riders', async (req, res) => {
+            const query = {}
+            if (req.query.status) {
+                query.status = req.query.status;
+            }
+            const cursor = ridersCollection.find(query)
+            const result = await cursor.toArray();
+            res.send(result);
+        })
+
+        app.post('/riders', async (req, res) => {
+            const rider = req.body;
+            rider.status = 'pending';
+            rider.createdAt = new Date();
+
+            const result = await ridersCollection.insertOne(rider);
+            res.send(result);
+        })
+
+        app.patch('/riders/:id', verifyFbToken, async (req, res) => {
+            const status = req.body.status;
+            const id = req.params.id;
+            const query = { _id: new ObjectId(id) }
+            const updatedDoc = {
+                $set: {
+                    status: status,
+                    statusUpdatedAt: new Date().toDateString()
+                }
+            }
+
+            const result = await ridersCollection.updateOne(query, updatedDoc);
+
+            if (status === 'approved') {
+                const email = req.body.email;
+                const userQuery = { email }
+                const updateUser = {
+                    $set: {
+                        role: 'rider'
+                    }
+                }
+                const userResult = await userCollection.updateOne(userQuery, updateUser);
+            }
+
+            res.send(result);
+        })
+
+        app.delete('/riders/:id', async(req,res)=>{
+          const id  = req.params.id
+          const query = {_id: new ObjectId(id)}
+          const result = await ridersCollection.deleteOne(query)
+          res.send(result)
+        })
+
 
     // all parcels api
 
