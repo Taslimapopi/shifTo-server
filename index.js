@@ -53,6 +53,7 @@ const crypto = require("crypto");
 const { Transform } = require("stream");
 const { runInNewContext } = require("vm");
 const { networkInterfaces } = require("os");
+const { asyncWrapProviders } = require("async_hooks");
 
 function generateTrackingId() {
   // Generate a random string using crypto
@@ -86,6 +87,18 @@ async function run() {
     const paymentsCollection = db.collection("payments");
     const usersCollection = db.collection("users");
     const ridersCollection = db.collection("riders");
+    const trackingsCollection = db.collection("trackings");
+
+    const trackingsLog = async (trackingId, status) => {
+      const log = {
+        trackingId: trackingId,
+        status: status,
+        details: status.split("-").join(" "),
+        createdAt: new Date(),
+      };
+      const result = await trackingsCollection.insertOne(log);
+      return result;
+    };
 
     // all users api
 
@@ -285,7 +298,7 @@ async function run() {
     // status patch
     app.patch("/parcels/:id", async (req, res) => {
       const id = req.params.id;
-      const { riderId, riderName, riderEmail } = req.body;
+      const { riderId, riderName, riderEmail, trackingId } = req.body;
 
       const query = { _id: new ObjectId(id) };
       const updateDoc = {
@@ -298,6 +311,8 @@ async function run() {
       };
 
       const result = await parcelsCollection.updateOne(query, updateDoc);
+
+      trackingsLog(trackingId, "rider-assigned");
 
       // update rider information
       const riderQuery = { _id: new ObjectId(riderId) };
@@ -339,6 +354,8 @@ async function run() {
           riderUpdatedDoc,
         );
       }
+
+      trackingsLog(trackingId, deliveryStatus);
 
       const result = await parcelsCollection.updateOne(query, updatedDoc);
       res.send(result);
@@ -431,6 +448,8 @@ async function run() {
         };
         const result = await parcelsCollection.updateOne(query, update);
 
+        trackingsLog(trackingId, "parcel_paid");
+
         const payment = {
           parcelName: session.metadata.parcelName,
           parcelId: session.metadata.parcelId,
@@ -468,6 +487,18 @@ async function run() {
         }
       }
       const result = await paymentsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // tracking related api
+
+    app.get("/tracking/:trackingId/logs", async (req, res) => {
+      const trackingId = req.params.trackingId;
+      const query = { trackingId };
+      const result = await trackingsCollection
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
     });
 
