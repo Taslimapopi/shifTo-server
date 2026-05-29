@@ -11,7 +11,11 @@ const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster
 
 let admin = require("firebase-admin");
 
-let serviceAccount = require("./shifto-firebase-adminsdk.json");
+// let serviceAccount = require("./shifto-firebase-adminsdk.json");
+
+
+const decoded = Buffer.from(process.env.Firebasekey, 'base64').toString('utf8')
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -20,7 +24,28 @@ admin.initializeApp({
 // middleware
 
 app.use(express.json());
-app.use(cors());
+// app.use(cors());
+
+// app.use(cors({
+//   origin: "http://localhost:5173",
+//   credentials: true,
+// }));
+
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://shifto-3eedb.web.app",
+];
+
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+}));
 
 const verifyFbToken = async (req, res, next) => {
   const token = req.headers.authorization;
@@ -54,6 +79,7 @@ const { Transform } = require("stream");
 const { runInNewContext } = require("vm");
 const { networkInterfaces } = require("os");
 const { asyncWrapProviders } = require("async_hooks");
+const { group } = require("console");
 
 function generateTrackingId() {
   // Generate a random string using crypto
@@ -68,7 +94,7 @@ function generateTrackingId() {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // export default app;
 
     // admin middleware
 
@@ -134,7 +160,7 @@ async function run() {
       const email = user.email;
       const userExist = await usersCollection.findOne({ email });
       if (userExist) {
-        return res.result({ message: "user already existed" });
+         return res.status(409).send({ message: "user already exists" });
       }
       user.role = "user";
       user.createdAt = new Date().toISOString();
@@ -209,6 +235,7 @@ async function run() {
 
         if (status === "approved") {
           updateFields.workStatus = "available";
+          
         }
 
         let updateDoc = {
@@ -221,9 +248,7 @@ async function run() {
 
         const result = await ridersCollection.updateOne(query, updateDoc);
 
-        // const result = await ridersCollection.updateOne(query, {
-        //   $set: updateFields,
-        // });
+
 
         let userResult = null; // ✅ FIX
 
@@ -375,6 +400,17 @@ async function run() {
       const result = await parcelsCollection.deleteOne(query);
       res.send(result);
     });
+
+    app.get("/parcels/stats", async(req, res)=>{
+      const pipeline = [{
+        $group:{
+          _id: "$deliveryStatus",
+          count:{$sum:1}
+        }
+      }]
+      const result = await parcelsCollection.aggregate(pipeline).toArray()
+      res.send(result)
+    })
 
     // payment related apis
 
